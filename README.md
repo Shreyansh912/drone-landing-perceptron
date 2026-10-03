@@ -170,3 +170,8 @@ python perceptron/baseline_comparison.py
 
 ### 3. Dynamic Moving Platform Intercept & Tracking
 ![Moving Target Rendezvous](results/stage12_moving_target_trajectory.png)
+
+### 4. Interactive 3D Quadrotor Airframe & Trajectory Prototype
+A native VTK/PyVista 3D visualizer modeling airframe geometry, carbon-fiber cross arms, rotor disks, and spatial descent trajectory toward the ground pad:
+
+![3D Drone Prototype](results/stage13_3d_prototype_render.png)

@@ -1,0 +1,4 @@
+Model,Accuracy,F1-Score,False-Safe Rate,Latency (μs),Parameters,Interpretability
+Custom Perceptron,100.0%,1.0000,0.00%,3.63 μs,7,High (Direct Weights)
+Logistic Regression,100.0%,1.0000,0.00%,7.18 μs,7,High (Direct Weights)
+Small MLP (6-8-1),100.0%,1.0000,0.00%,8.84 μs,65,Low (Non-linear)

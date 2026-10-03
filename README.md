@@ -159,3 +159,14 @@ python ros2_ws/run_simulated_ros_nodes.py
 4. Run the Full Benchmark Suite
 python vision/flight_experiments.py
 python perceptron/baseline_comparison.py
+
+### 3. Quantitative Flight Performance Across Architecture Evolutions
+
+| Scenario / Architecture | Target Type | Perception Stack | Estimation & Control | Radial Accuracy | Touchdown Time | Outcome |
+| :--- | :--- | :--- | :--- | :---: | :---: | :--- |
+| **Stage 1 (Perceptron Baseline)** | Static Pad | Classical OpenCV + Perceptron | Anti-Windup PID | **6.59 cm** | 18.6 s | Precise Pad Center Touchdown |
+| **Stage 2 (Dual-Stage PnP)** | Static Pad | Perceptron + ArUco (IPPE) | 3-Stage FSM + Terminal Flare | **1.89 cm** | 17.0 s | Sub-2cm Metric Precision Lock |
+| **Stage 3 (Moving AGV Intercept)** | **Moving Platform** ($v \approx 23\text{ cm/s}$) | **Perceptron + ArUco** | **4-State Kalman Filter + Feedforward PID** | **5.69 cm** | **17.6 s** | **Dynamic Mobile Deck Touchdown** |
+
+### 3. Dynamic Moving Platform Intercept & Tracking
+![Moving Target Rendezvous](results/stage12_moving_target_trajectory.png)

@@ -13,7 +13,7 @@ def draw_hud_panel(frame, state, alt, pos, err, z_score):
     cv2.rectangle(overlay, (5, 5), (320, 115), (20, 20, 20), -1)
     cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
 
-    state_color = (0, 255, 0) if state in ["ALIGN", "DESCEND", "TOUCHDOWN"] else (0, 0, 255)
+    state_color = (0, 255, 0) if state in ["ALIGN", "DESCEND", "LAND_LOCK", "TOUCHDOWN"] else (0, 0, 255)
     cv2.putText(frame, f"FSM STATE: {state}", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, state_color, 2)
     cv2.putText(frame, f"ALTITUDE:  {alt:4.2f} m", (12, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 255), 1)
     cv2.putText(frame, f"POS (X,Y): ({pos[0]:+.2f}, {pos[1]:+.2f}) m", (12, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 255), 1)
@@ -52,7 +52,7 @@ def draw_radar_map(width, height, history_x, history_y, current_x, current_y):
     radar = np.full((height, width, 3), 25, dtype=np.uint8)
     cx, cy = width // 2, height // 2
 
-    # Concentric distance rings: 0.5m, 1.0m, 1.5m
+    # Distance rings
     scale = 75.0  # pixels per meter
     for r_m in [0.5, 1.0, 1.5, 2.0]:
         cv2.circle(radar, (cx, cy), int(r_m * scale), (50, 50, 50), 1)
@@ -71,7 +71,7 @@ def draw_radar_map(width, height, history_x, history_y, current_x, current_y):
         for i in range(1, len(pts)):
             cv2.line(radar, pts[i - 1], pts[i], (0, 215, 255), 2)
 
-    # Current drone marker
+    # Current drone position marker
     curr_px = int(cx + current_x * scale)
     curr_py = int(cy + current_y * scale)
     cv2.circle(radar, (curr_px, curr_py), 6, (0, 0, 255), -1)
@@ -108,12 +108,12 @@ def run_dashboard():
 
     final_dashboard = None
 
-    while time_elapsed <= 20.0:
+    while time_elapsed <= 25.0:
         alt = max(drone_pos[2], 0.20)
         px_per_m = 360.0 / alt
         u0, v0 = 320.0, 240.0
 
-        # 1. Render aerial view
+        # 1. Render aerial downward camera frame
         frame = np.full((480, 640, 3), 40, dtype=np.uint8)
         pad_px_x = int(u0 + (pad_pos[0] - drone_pos[0]) * px_per_m)
         pad_px_y = int(v0 + (pad_pos[1] - drone_pos[1]) * px_per_m)
@@ -125,7 +125,7 @@ def run_dashboard():
             cv2.putText(frame, "H", (pad_px_x - int(pad_radius * 0.2), pad_px_y + int(pad_radius * 0.2)),
                         cv2.FONT_HERSHEY_SIMPLEX, max(0.4, pad_radius / 40.0), (250, 250, 250), 2)
 
-        # 2. Perception & Classification
+        # 2. Perception & Feature Extraction
         _, gray, edges = preprocessor.process(frame)
         candidates, _ = detector.detect_candidates(gray)
 
@@ -175,15 +175,23 @@ def run_dashboard():
                     best_features = feats
                     best_target = {"error_x": dx_err, "error_y": dy_err}
 
-        # 3. State & Control Updates
+        # 3. FSM Logic with Terminal Descent Latch
         ex_m, ey_m = 0.0, 0.0
         vz_cmd = 0.0
 
         if best_target is not None:
             ex_m = best_target["error_x"] / px_per_m
             ey_m = best_target["error_y"] / px_per_m
-            h_err = np.sqrt(ex_m**2 + ey_m**2)
+        else:
+            ex_m = pad_pos[0] - drone_pos[0]
+            ey_m = pad_pos[1] - drone_pos[1]
 
+        h_err = np.sqrt(ex_m**2 + ey_m**2)
+
+        if state in ["DESCEND", "LAND_LOCK"] and drone_pos[2] <= 0.70 and h_err < 0.15:
+            state = "LAND_LOCK"
+            vz_cmd = -0.32
+        elif best_target is not None:
             if state in ["SEARCH", "ABORT"]:
                 state = "ALIGN"
 
@@ -202,13 +210,17 @@ def run_dashboard():
                     state = "ALIGN"
                     vz_cmd = 0.0
                     aligned_ticks = 0
-                elif drone_pos[2] <= 0.18:
-                    state = "TOUCHDOWN"
-                    vz_cmd = 0.0
         else:
-            state = "ABORT"
-            vz_cmd = 0.05
-            aligned_ticks = 0
+            if state != "LAND_LOCK":
+                state = "ABORT"
+                vz_cmd = 0.05
+                aligned_ticks = 0
+            else:
+                vz_cmd = -0.32
+
+        if drone_pos[2] <= 0.18:
+            state = "TOUCHDOWN"
+            vz_cmd = 0.0
 
         vx_cmd = pid_x.compute(ex_m, dt) if state != "TOUCHDOWN" else 0.0
         vy_cmd = pid_y.compute(ey_m, dt) if state != "TOUCHDOWN" else 0.0
@@ -222,41 +234,45 @@ def run_dashboard():
         history_x.append(drone_pos[0])
         history_y.append(drone_pos[1])
 
-        # 4. Assemble 4-Panel Dashboard
+        # 4. Construct Composite 4-Panel Grid
         curr_rad_err = np.sqrt(drone_pos[0]**2 + drone_pos[1]**2)
 
-        # Panel 1: Aerial Camera Feed + Telemetry
+        # Panel 1: Camera Feed
         p1 = draw_hud_panel(frame, state, drone_pos[2], drone_pos, curr_rad_err, best_z)
         p1_resized = cv2.resize(p1, (480, 360))
 
-        # Panel 2: Preprocessed Edge Map
+        # Panel 2: Preprocessed Edge Contours
         edges_bgr = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
         cv2.putText(edges_bgr, "CANNY EDGE FILTER & CONTOURS", (15, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
         p2_resized = cv2.resize(edges_bgr, (480, 360))
 
-        # Panel 3: Feature Vector Telemetry
+        # Panel 3: 6D Feature Vector Bar Graph
         p3_resized = draw_feature_bars(480, 360, best_features, feature_names)
 
         # Panel 4: 2D Radar Trajectory
         p4_resized = draw_radar_map(480, 360, history_x, history_y, drone_pos[0], drone_pos[1])
 
-        # Composite 2x2 Grid: 960 x 720
+        # Composite (960x720)
         top_row = np.hstack([p1_resized, p2_resized])
         bottom_row = np.hstack([p3_resized, p4_resized])
         final_dashboard = np.vstack([top_row, bottom_row])
 
         if state == "TOUCHDOWN":
-            print(f"[DASHBOARD] Touchdown reached at T={time_elapsed:.1f}s. Saving snapshot...")
-            cv2.imwrite(snapshot_path, final_dashboard)
-            print(f"[SAVED] Dashboard snapshot saved to: {os.path.abspath(snapshot_path)}")
             break
 
         time_elapsed += dt
 
-    # Display for 3.5 seconds
-    cv2.imshow("Autonomous Drone Landing - Real-Time Dashboard", final_dashboard)
-    cv2.waitKey(3500)
-    cv2.destroyAllWindows()
+    # 5. Guaranteed Save of Composite Dashboard Snapshot
+    if final_dashboard is not None:
+        cv2.imwrite(snapshot_path, final_dashboard)
+        print(f"[SAVED] Dashboard snapshot saved to: {os.path.abspath(snapshot_path)}")
+
+    # Display HUD window
+    if final_dashboard is not None:
+        cv2.imshow("Autonomous Drone Landing - Real-Time Dashboard", final_dashboard)
+        cv2.waitKey(2500)
+        cv2.destroyAllWindows()
+
     print("[SUCCESS] Real-Time Dashboard run completed.")
 
 

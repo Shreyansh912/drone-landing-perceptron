@@ -1,0 +1,32 @@
+@'
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environments
+env/
+venv/
+ENV/
+drone_perceptron/
+.conda/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# ROS 2 build directories
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+'@ | Set-Content -Path ".gitignore" -Encoding utf8
